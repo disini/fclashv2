@@ -1,0 +1,52 @@
+import 'package:flutter/material.dart';
+
+class MyExpansionList extends StatelessWidget {
+  const MyExpansionList(
+      {super.key,
+      required this.children,
+      required this.isExpanded,
+      required this.expansionCallback});
+  final List<MyExpansionTile> children;
+  final List<bool> isExpanded;
+  final void Function(int idx, bool isExpanded) expansionCallback;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: _buildList(context, children),
+    );
+  }
+
+  List<Widget> _buildList(
+      BuildContext context, List<MyExpansionTile> children) {
+    return [
+      for (var (idx, tile) in children.indexed) ...[
+        SliverToBoxAdapter(
+          child: InkWell(
+            onTap: () => expansionCallback(idx, !isExpanded[idx]),
+            child: tile.headerBuilder(context, isExpanded[idx]),
+          ),
+        ),
+        SliverVisibility(
+          maintainState: false,
+          maintainAnimation: false,
+          maintainSize: false,
+          maintainSemantics: false,
+          maintainInteractivity: false,
+          visible: isExpanded[idx],
+          sliver: tile.bodyBuilder(context, isExpanded[idx]),
+        ),
+      ]
+    ];
+  }
+}
+
+class MyExpansionTile {
+  final Widget Function(BuildContext context, bool isExpanded) headerBuilder;
+  final Widget Function(BuildContext context, bool isExpanded) bodyBuilder;
+
+  MyExpansionTile({
+    required this.headerBuilder,
+    required this.bodyBuilder,
+  });
+}

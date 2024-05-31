@@ -1,0 +1,332 @@
+import 'package:fclashv2/components/delay_info.dart';
+import 'package:fclashv2/components/expansion_list.dart';
+import 'package:fclashv2/components/node_card.dart';
+import 'package:fclashv2/models/clash/config.dart';
+import 'package:fclashv2/models/clash/proxies.dart';
+import 'package:fclashv2/providers/clash/config_provider.dart';
+import 'package:fclashv2/providers/clash/proxies_provider.dart';
+import 'package:fclashv2/utils/utils.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+class ProxiesPage extends ConsumerStatefulWidget {
+  const ProxiesPage({super.key});
+
+  ConsumerState<ProxiesPage> createState() => _ProxiesPageState();
+}
+
+class _ProxiesPageState extends ConsumerState<ProxiesPage> {
+  List<bool> expansions = [];
+  List<ClashProxyItem> groups = [];
+  int selectedModeIdx = 0;
+  bool get isAllExpanded => expansions.every((val) => val);
+  late final List<Widget> views = [];
+
+  List<ClashProxyItem> getGroups(ClashProxies proxies) =>
+      proxies.proxies.values.where((node) => node.type.isGroup()).toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final proxies = ref.watch(proxiesNotifierProvider);
+    final delays = ref.watch(delayStatusNotifierProvider);
+    final clashConf = ref.watch(clashConfigNotifierProvider);
+    return Scaffold(
+      floatingActionButton: selectedModeIdx == 0
+          ? FloatingActionButton.extended(
+              backgroundColor: theme.colorScheme.secondaryContainer,
+              onPressed: () {
+                setState(() {
+                  final s = isAllExpanded;
+                  expansions = [for (var i = 0; i < expansions.length; i++) !s];
+                });
+              },
+              icon: Icon(isAllExpanded
+                  ? Icons.expand_less_rounded
+                  : Icons.expand_more_rounded),
+              label: Text(isAllExpanded ? "Shrink" : "Expand"),
+              tooltip: isAllExpanded ? "Shrink" : "Expand",
+            )
+          : null,
+      appBar: AppBar(
+        actions: clashConf.when(
+          data: (conf) {
+            final modes = ProxyMode.values;
+            if (selectedModeIdx != modes.indexOf(conf.mode!)) {
+              setState(() {
+                selectedModeIdx = modes.indexOf(conf.mode!);
+              });
+            }
+            return [
+              Container(
+                child: ToggleButtons(
+                    onPressed: (idx) {
+                      selectedModeIdx = idx;
+                      ref
+                          .read(clashConfigNotifierProvider.notifier)
+                          .updateProxyMode(modes[idx]);
+                    },
+                    children: modes.map<Widget>((m) => Text(m.info)).toList(),
+                    isSelected: modes.map((m) => m == conf.mode).toList()),
+              )
+            ];
+          },
+          loading: () => null,
+          error: (error, stackTrace) => null,
+        ),
+        bottom: clashConf.when(
+          loading: () => PreferredSize(
+            preferredSize: Size.fromHeight(5),
+            child: LinearProgressIndicator(),
+          ),
+          data: (_) => null,
+          error: (_, __) => PreferredSize(
+            preferredSize: Size.fromHeight(5),
+            child: Container(
+              height: 5,
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ),
+      ),
+      body: proxies.when(
+        data: (p) {
+          groups = getGroups(p);
+          if (expansions.length < groups.length) {
+            expansions = [for (var i = 0; i < groups.length; i++) false];
+          }
+          return Align(
+              alignment: Alignment.topCenter,
+              child: _buildPage(
+                p,
+                theme,
+                groups,
+                delays,
+              ));
+        },
+        loading: () => const SizedBox(),
+        error: (error, stack) =>
+            Text("${error}\n${stack}", style: textTheme.displayMedium),
+      ),
+    );
+  }
+
+  Widget _buildPage(
+    ClashProxies proxies,
+    ThemeData theme,
+    List<ClashProxyItem> groups,
+    Map<String, ProxyDelay> delays,
+  ) {
+    final textTheme = theme.textTheme;
+    final colorScheme = theme.colorScheme;
+    switch (selectedModeIdx) {
+      case 0:
+        return _buildRuleView(colorScheme, textTheme, delays, proxies);
+      case 1:
+        return _buildGloalView(colorScheme, textTheme, delays, proxies);
+      case 2:
+        return _buildDirectView(textTheme);
+      default:
+        return _buildRuleView(colorScheme, textTheme, delays, proxies);
+    }
+  }
+
+  Widget _buildDirectView(TextTheme textTheme) => Center(
+        child: Text(
+          "Direct",
+          style: textTheme.displayMedium,
+        ),
+      );
+
+  Widget _buildGloalView(ColorScheme colorScheme, TextTheme textTheme,
+      Map<String, ProxyDelay> delays, ClashProxies proxies) {
+    final name = "GLOBAL";
+    if (groups.every((node) => node.name != name)) {
+      return Center(
+        child: Text("Can't find a group that is marked as $name selector"),
+      );
+    }
+    final global = proxies.proxies[name]!;
+    return MyExpansionList(children: [
+      MyExpansionTile(
+        headerBuilder: (context, isExpanded) {
+          return Container(
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+            ),
+            margin: const EdgeInsets.all(3),
+            padding: const EdgeInsets.all(3),
+            child: ListTile(
+              isThreeLine: false,
+              titleTextStyle: textTheme.titleLarge,
+              subtitleTextStyle: textTheme.labelMedium,
+              title: Text(name),
+              trailing: Container(
+                width: 50,
+                height: 35,
+                decoration:
+                    BoxDecoration(borderRadius: BorderRadius.circular(15)),
+                child: DelayInfo(
+                  radius: 15,
+                  delay: delays[name] ?? ProxyDelay(status: DelayStatus.todo),
+                  onTap: () {
+                    ref
+                        .read(delayStatusNotifierProvider.notifier)
+                        .updateSingleNodeDelay(name);
+                    ref
+                        .read(delayStatusNotifierProvider.notifier)
+                        .updateGroupDelay(name, global.all);
+                  },
+                ),
+              ),
+              subtitle: Wrap(
+                spacing: 5,
+                runSpacing: 5,
+                children: [
+                  Text(global.now ?? "-"),
+                  ...(global.all?.map(
+                        (node) => Container(
+                          height: 10,
+                          width: 10,
+                          decoration: BoxDecoration(
+                            color: delays[node]?.status == DelayStatus.todo
+                                ? Colors.transparent
+                                : Utils.parseDelay(delays[node]?.delay ?? 0),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ) ??
+                      <Widget>[]),
+                ],
+              ),
+            ),
+          );
+        },
+        bodyBuilder: (context, isExpanded) {
+          return _buildGroupBoardBody(global, proxies, delays);
+        },
+      ),
+    ], isExpanded: [
+      true
+    ], expansionCallback: (_, __) {});
+  }
+
+  MyExpansionList _buildRuleView(ColorScheme colorScheme, TextTheme textTheme,
+      Map<String, ProxyDelay> delays, ClashProxies proxies) {
+    return MyExpansionList(
+      isExpanded: expansions,
+      expansionCallback: (idx, status) => setState(() {
+        expansions[idx] = status;
+      }),
+      children: groups.indexed.map<MyExpansionTile>((v) {
+        final group = v.$2;
+        final name = group.name ?? "";
+        final now = group.now ?? "";
+        return MyExpansionTile(
+          headerBuilder: (context, isExpanded) {
+            return Container(
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer,
+              ),
+              margin: const EdgeInsets.all(3),
+              padding: const EdgeInsets.all(3),
+              child: ListTile(
+                isThreeLine: false,
+                titleTextStyle: textTheme.titleLarge,
+                subtitleTextStyle: textTheme.labelMedium,
+                title: Text(name),
+                trailing: Container(
+                  width: 50,
+                  height: 35,
+                  decoration:
+                      BoxDecoration(borderRadius: BorderRadius.circular(15)),
+                  child: DelayInfo(
+                    radius: 15,
+                    delay: delays[name] ?? ProxyDelay(status: DelayStatus.todo),
+                    onTap: () {
+                      ref
+                          .read(delayStatusNotifierProvider.notifier)
+                          .updateSingleNodeDelay(name);
+                      ref
+                          .read(delayStatusNotifierProvider.notifier)
+                          .updateGroupDelay(group.name ?? "", group.all);
+                    },
+                  ),
+                ),
+                subtitle: Wrap(
+                  spacing: 5,
+                  runSpacing: 5,
+                  children: [
+                    Text(now),
+                    ...(group.all?.map(
+                          (node) => Container(
+                            height: 10,
+                            width: 10,
+                            decoration: BoxDecoration(
+                              color: Utils.parseDelay(
+                                  delays[node]?.delay ?? delayInfinity),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ) ??
+                        <Widget>[]),
+                  ],
+                ),
+              ),
+            );
+          },
+          bodyBuilder: (context, isExpanded) {
+            return _buildGroupBoardBody(group, proxies, delays);
+          },
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildGroupBoardBody(ClashProxyItem group, ClashProxies proxies,
+      Map<String, ProxyDelay> delays) {
+    return SliverGrid.builder(
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 200,
+        childAspectRatio: 3.0,
+        //mainAxisExtent: 65,
+        mainAxisSpacing: 5,
+        crossAxisSpacing: 5,
+      ),
+      itemCount: group.all?.length ?? 0,
+      itemBuilder: (context, idx) {
+        final textTheme = Theme.of(context).textTheme;
+        final colorscheme = Theme.of(context).colorScheme;
+        final node = proxies.proxies[group.all![idx]]!;
+        return _buildNodeCard(group, node, colorscheme, textTheme,
+            delays[node.name ?? ""] ?? ProxyDelay(status: DelayStatus.todo));
+      },
+    );
+  }
+
+  Widget _buildNodeCard(ClashProxyItem group, ClashProxyItem node,
+      ColorScheme colorscheme, TextTheme textTheme, ProxyDelay delay) {
+    return NodeCard(
+      nodeName: node.name,
+      isUdp: node.udp,
+      onPressed: () async => await ref
+          .read(proxiesNotifierProvider.notifier)
+          .changeNodeForSelector(group.name ?? "", node.name ?? ""),
+      onDelayTest: () async => await ref
+          .read(delayStatusNotifierProvider.notifier)
+          .updateSingleNodeDelay(node.name ?? ""),
+      delay: delay.status == DelayStatus.failed
+          ? "Error"
+          : delay.delay?.toString(),
+      titleStyle: textTheme.labelLarge,
+      subTitleStyle: textTheme.labelMedium,
+      delayStyle: textTheme.labelSmall
+          ?.copyWith(color: Utils.parseDelay(delay.delay ?? delayInfinity)),
+      type: node.type,
+      backgroundColor: group.now == node.name
+          ? colorscheme.tertiaryContainer
+          : colorscheme.primaryContainer,
+    );
+  }
+}
